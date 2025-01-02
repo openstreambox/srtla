@@ -39,7 +39,7 @@
 
 #include <argparse/argparse.hpp>
 
-#include "main.h"
+#include "receiver.h"
 
 int srtla_sock;
 // Use sockaddr_storage to handle both IPv4 and IPv6

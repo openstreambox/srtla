@@ -8,18 +8,30 @@ find_package(spdlog REQUIRED)
 add_executable(srtla_rec
     src/common.c
     src/common.h
-    src/main.cpp
-    src/main.h)
+    src/receiver.cpp
+    src/receiver.h)
 
 target_include_directories(srtla_rec PRIVATE
 	"deps/argparse/include")
-
 target_link_libraries(srtla_rec PRIVATE
     spdlog::spdlog)
-
 target_compile_features(srtla_rec PRIVATE cxx_std_17)
 #target_compile_options(srtla_rec PRIVATE -Wall -Wextra)
 target_compile_definitions(srtla_rec PUBLIC VERSION="${CMAKE_PROJECT_VERSION}")
 
+add_executable(srtla_send
+    src/common.c
+    src/common.h
+    src/sender.cpp)
+target_include_directories(srtla_send PRIVATE
+	"deps/argparse/include")
+target_link_libraries(srtla_send PRIVATE
+    spdlog::spdlog)
+target_compile_features(srtla_send PRIVATE cxx_std_17)
+#target_compile_options(srtla_send PRIVATE -Wall -Wextra)
+target_compile_definitions(srtla_send PUBLIC VERSION="${CMAKE_PROJECT_VERSION}")
+
+
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 install(TARGETS srtla_rec)
+install(TARGETS srtla_send)
