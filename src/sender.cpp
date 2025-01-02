@@ -17,19 +17,19 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
-#include <unistd.h>
-#include <time.h>
-#include <signal.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <assert.h>
 #include <fstream>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "sender.h"
 
@@ -88,7 +88,6 @@ time_t pending_reg_timeout = 0;
 
 char srtla_id[SRTLA_ID_LEN];
 
-
 /*
 
 Async I/O support
@@ -98,16 +97,19 @@ fd_set active_fds;
 int max_act_fd = -1;
 
 int add_active_fd(int fd) {
-  if (fd < 0) return -1;
+  if (fd < 0)
+    return -1;
 
-  if (fd > max_act_fd) max_act_fd = fd;
+  if (fd > max_act_fd)
+    max_act_fd = fd;
   FD_SET(fd, &active_fds);
 
   return 0;
 }
 
 int remove_active_fd(int fd) {
-  if (fd < 0) return -1;
+  if (fd < 0)
+    return -1;
 
   FD_CLR(fd, &active_fds);
 
@@ -120,7 +122,8 @@ srtla registration helpers
 
 */
 int send_reg1(conn_t *c) {
-  if (c->fd < 0) return -1;
+  if (c->fd < 0)
+    return -1;
 
   char buf[MTU];
   uint16_t packet_type = htobe16(SRTLA_TYPE_REG1);
@@ -128,13 +131,15 @@ int send_reg1(conn_t *c) {
   memcpy(buf + sizeof(packet_type), srtla_id, SRTLA_ID_LEN);
 
   int ret = sendto(c->fd, buf, SRTLA_TYPE_REG1_LEN, 0, &srtla_addr, addr_len);
-  if (ret != SRTLA_TYPE_REG1_LEN) return -1;
+  if (ret != SRTLA_TYPE_REG1_LEN)
+    return -1;
 
   return 0;
 }
 
 int send_reg2(conn_t *c) {
-  if (c->fd < 0) return -1;
+  if (c->fd < 0)
+    return -1;
 
   char buf[SRTLA_TYPE_REG2_LEN];
   uint16_t packet_type = htobe16(SRTLA_TYPE_REG2);
@@ -145,15 +150,14 @@ int send_reg2(conn_t *c) {
   return (ret == SRTLA_TYPE_REG2_LEN) ? 0 : -1;
 }
 
-
 /*
 
 Handling code for packets coming from the SRT caller
 
 */
 void reg_pkt(conn_t *c, int32_t packet) {
-  spdlog::debug("{} ({}) register packet {} at idx {}", 
-    print_addr(&c->src), fmt::ptr(c), packet, c->pkt_idx); 
+  spdlog::debug("{} ({}) register packet {} at idx {}", print_addr(&c->src),
+                fmt::ptr(c), packet, c->pkt_idx);
   c->pkt_log[c->pkt_idx] = packet;
   c->pkt_idx++;
   c->pkt_idx %= PKT_LOG_SZ;
@@ -191,8 +195,8 @@ conn_t *select_conn() {
     }*/
 
     if (conn_timed_out(c, t)) {
-      spdlog::debug("{} ({}): is timed out, ignoring it", 
-              print_addr(&c->src), fmt::ptr(c));
+      spdlog::debug("{} ({}): is timed out, ignoring it", print_addr(&c->src),
+                    fmt::ptr(c));
       continue;
     }
 
@@ -224,15 +228,15 @@ void handle_srt_data(int fd) {
         reg_pkt(c, sn);
       }
     } else {
-      /* If sending the packet fails, adjust the timestamp to disable the link until a
-         reconnection is confirmed. 1 so connection_housekeeping() prints its message */
+      /* If sending the packet fails, adjust the timestamp to disable the link
+         until a reconnection is confirmed. 1 so connection_housekeeping()
+         prints its message */
       c->last_rcvd = 1;
-       spdlog::error("{} ({}): sendto() failed, disabling the connection",
-          print_addr(&c->src), fmt::ptr(c));
+      spdlog::error("{} ({}): sendto() failed, disabling the connection",
+                    print_addr(&c->src), fmt::ptr(c));
     }
   }
 }
-
 
 /*
 
@@ -241,7 +245,8 @@ Handling code for packets coming from the receiver
 */
 int get_pkt_idx(int idx, int increment) {
   idx = idx + increment;
-  if (idx < 0) idx += PKT_LOG_SZ;
+  if (idx < 0)
+    idx += PKT_LOG_SZ;
   idx %= PKT_LOG_SZ;
   assert(idx >= 0 && idx < PKT_LOG_SZ);
   return idx;
@@ -254,11 +259,11 @@ void register_nak(int32_t packet) {
       if (c->pkt_log[i] == packet) {
         c->pkt_log[i] = -1;
         // It might be better to use exponential decay like this
-        //c->window = c->window * 998 / 1000;
+        // c->window = c->window * 998 / 1000;
         c->window -= WINDOW_DECR;
-        c->window = max(c->window, WINDOW_MIN*WINDOW_MULT);
+        c->window = max(c->window, WINDOW_MIN * WINDOW_MULT);
         spdlog::debug("{} ({}): found NAKed packet {} in the log",
-              print_addr(&c->src), fmt::ptr(c), packet);
+                      print_addr(&c->src), fmt::ptr(c), packet);
         return;
       }
     }
@@ -280,7 +285,7 @@ void register_srtla_ack(int32_t ack) {
         }
         c->pkt_log[i] = -1;
 
-        if (c->in_flight_pkts*WINDOW_MULT > c->window) {
+        if (c->in_flight_pkts * WINDOW_MULT > c->window) {
           c->window += WINDOW_INCR - 1;
         }
 
@@ -290,7 +295,7 @@ void register_srtla_ack(int32_t ack) {
 
     if (c->last_rcvd != 0) {
       c->window += 1;
-      c->window = min(c->window, WINDOW_MAX*WINDOW_MULT);
+      c->window = min(c->window, WINDOW_MAX * WINDOW_MULT);
     }
   }
 }
@@ -324,7 +329,8 @@ void handle_srtla_data(conn_t *c) {
   char buf[MTU];
 
   int n = recvfrom(c->fd, &buf, MTU, 0, NULL, NULL);
-  if (n <= 0) return;
+  if (n <= 0)
+    return;
 
   time_t ts;
   get_seconds(&ts);
@@ -335,11 +341,12 @@ void handle_srtla_data(conn_t *c) {
      Otherwise they could be keeping failed connections marked active */
   if (packet_type == SRTLA_TYPE_REG_NGP) {
     /* Only process NGPs if:
-       * we don't have any established connections
-       * and we don't already have a pending REG1->REG2 exhange in flight
-       * and we don't have any pending REG2->REG3 exchanges in flight
-    */
-    if (active_connections == 0 && pending_reg2_conn == NULL && ts > pending_reg_timeout) {
+     * we don't have any established connections
+     * and we don't already have a pending REG1->REG2 exhange in flight
+     * and we don't have any pending REG2->REG3 exchanges in flight
+     */
+    if (active_connections == 0 && pending_reg2_conn == NULL &&
+        ts > pending_reg_timeout) {
       if (send_reg1(c) == 0) {
         pending_reg2_conn = c;
         pending_reg_timeout = ts + REG2_TIMEOUT;
@@ -350,13 +357,14 @@ void handle_srtla_data(conn_t *c) {
   } else if (packet_type == SRTLA_TYPE_REG2) {
     if (pending_reg2_conn == c) {
       char *id = &buf[2];
-      if (memcmp(id, srtla_id, SRTLA_ID_LEN/2) != 0) {
-         spdlog::error("{} ({}): got a mismatching ID in SRTLA_REG2",
-           print_addr(&c->src), fmt::ptr(c));
+      if (memcmp(id, srtla_id, SRTLA_ID_LEN / 2) != 0) {
+        spdlog::error("{} ({}): got a mismatching ID in SRTLA_REG2",
+                      print_addr(&c->src), fmt::ptr(c));
         return;
       }
 
-      spdlog::info("{} ({}): connection group registered", print_addr(&c->src), fmt::ptr(c));
+      spdlog::info("{} ({}): connection group registered", print_addr(&c->src),
+                   fmt::ptr(c));
       memcpy(srtla_id, id, SRTLA_ID_LEN);
 
       /* Broadcast REG2 */
@@ -372,56 +380,56 @@ void handle_srtla_data(conn_t *c) {
 
   c->last_rcvd = ts;
 
-  switch(packet_type) {
-    case SRT_TYPE_ACK: {
-      uint32_t last_ack = *((uint32_t *)&buf[16]);
-      last_ack = be32toh(last_ack);
-      register_srt_ack(last_ack);
-      break;
-    }
+  switch (packet_type) {
+  case SRT_TYPE_ACK: {
+    uint32_t last_ack = *((uint32_t *)&buf[16]);
+    last_ack = be32toh(last_ack);
+    register_srt_ack(last_ack);
+    break;
+  }
 
-    case SRT_TYPE_NAK: {
-      uint32_t *ids = (uint32_t *)buf;
-      for (int i = 4; i < n/4; i++) {
-        uint32_t id = be32toh(ids[i]);
-        if (id & (1 << 31)) {
-          id = id & 0x7FFFFFFF;
-          uint32_t last_id = be32toh(ids[i+1]);
-          for (int32_t lost = id; lost <= last_id; lost++) {
-            register_nak(lost);
-          }
-          i++;
-        } else {
-          register_nak(id);
+  case SRT_TYPE_NAK: {
+    uint32_t *ids = (uint32_t *)buf;
+    for (int i = 4; i < n / 4; i++) {
+      uint32_t id = be32toh(ids[i]);
+      if (id & (1 << 31)) {
+        id = id & 0x7FFFFFFF;
+        uint32_t last_id = be32toh(ids[i + 1]);
+        for (int32_t lost = id; lost <= last_id; lost++) {
+          register_nak(lost);
         }
+        i++;
+      } else {
+        register_nak(id);
       }
-      break;
     }
+    break;
+  }
 
-    // srtla packets below, don't send to SRT
-    case SRTLA_TYPE_ACK: {
-      uint32_t *acks = (uint32_t *)buf;
-      for (int i = 1; i < n/4; i++) {
-        uint32_t id = be32toh(acks[i]);
-        spdlog::debug("{} ({}): ack {}\n", print_addr(&c->src), fmt::ptr(c), id);
-        register_srtla_ack(id);
-      }
-      return;
+  // srtla packets below, don't send to SRT
+  case SRTLA_TYPE_ACK: {
+    uint32_t *acks = (uint32_t *)buf;
+    for (int i = 1; i < n / 4; i++) {
+      uint32_t id = be32toh(acks[i]);
+      spdlog::debug("{} ({}): ack {}\n", print_addr(&c->src), fmt::ptr(c), id);
+      register_srtla_ack(id);
     }
-    case SRTLA_TYPE_KEEPALIVE:
-      spdlog::debug("{} ({}): got a keepalive", print_addr(&c->src), fmt::ptr(c));
-      return; // don't send to SRT
+    return;
+  }
+  case SRTLA_TYPE_KEEPALIVE:
+    spdlog::debug("{} ({}): got a keepalive", print_addr(&c->src), fmt::ptr(c));
+    return; // don't send to SRT
 
-    case SRTLA_TYPE_REG3:
-      has_connected = 1;
-      active_connections++;
-      spdlog::info("{} ({}): connection established", print_addr(&c->src), fmt::ptr(c));
-      return;
+  case SRTLA_TYPE_REG3:
+    has_connected = 1;
+    active_connections++;
+    spdlog::info("{} ({}): connection established", print_addr(&c->src),
+                 fmt::ptr(c));
+    return;
   } // switch
 
   sendto(listenfd, &buf, n, 0, &srt_addr, addr_len);
 }
-
 
 /*
 
@@ -448,7 +456,7 @@ int setup_conns(char *source_ip_file) {
   int count = 0;
   char *line = NULL;
   size_t line_len = 0;
-  while(getline(&line, &line_len, config) >= 0) {
+  while (getline(&line, &line_len, config) >= 0) {
     char *nl;
     if ((nl = strchr(line, '\n'))) {
       *nl = '\0';
@@ -472,13 +480,15 @@ int setup_conns(char *source_ip_file) {
 
         count++;
 
-        spdlog::info("Added connection via {} ({})", print_addr(&c->src), fmt::ptr(c));
+        spdlog::info("Added connection via {} ({})", print_addr(&c->src),
+                     fmt::ptr(c));
       } else {
         c->removed = 0;
       }
     }
   }
-  if (line) free(line);
+  if (line)
+    free(line);
 
   fclose(config);
 
@@ -497,7 +507,8 @@ void update_conns(char *source_ip_file) {
   for (conn_t *c = conns; c != NULL; c = next) {
     next = c->next;
     if (c->removed) {
-      spdlog::info("Removed connection via {} ({})", print_addr(&c->src), fmt::ptr(c));
+      spdlog::info("Removed connection via {} ({})", print_addr(&c->src),
+                   fmt::ptr(c));
 
       if (c == pending_reg2_conn) {
         pending_reg2_conn = NULL;
@@ -513,9 +524,7 @@ void update_conns(char *source_ip_file) {
   }
 }
 
-void schedule_update_conns(int signal) {
-  do_update_conns = 1;
-}
+void schedule_update_conns(int signal) { do_update_conns = 1; }
 
 int open_socket(conn_t *c, int quiet) {
   if (c->fd >= 0) {
@@ -527,7 +536,7 @@ int open_socket(conn_t *c, int quiet) {
   // Set up the socket
   int fd = socket(AF_INET, SOCK_DGRAM, 0);
   if (fd < 0) {
-     spdlog::error("Failed to open a socket");
+    spdlog::error("Failed to open a socket");
     return -1;
   }
   struct timeval to;
@@ -535,12 +544,12 @@ int open_socket(conn_t *c, int quiet) {
   to.tv_usec = 0;
   int ret = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));
   if (ret != 0) {
-     spdlog::error("Failed to set receive timeout");
+    spdlog::error("Failed to set receive timeout");
     goto err;
   }
   ret = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof(to));
   if (ret != 0) {
-     spdlog::error("Failed to set send timeout");
+    spdlog::error("Failed to set send timeout");
     goto err;
   }
 
@@ -548,7 +557,8 @@ int open_socket(conn_t *c, int quiet) {
   ret = bind(fd, &c->src, sizeof(c->src));
   if (ret != 0) {
     if (!quiet) {
-       spdlog::error("Failed to bind to the source address {}", print_addr(&c->src));
+      spdlog::error("Failed to bind to the source address {}",
+                    print_addr(&c->src));
     }
     goto err;
   }
@@ -600,7 +610,8 @@ void connection_housekeeping() {
   static uint64_t last_ran = 0;
   uint64_t ms;
   assert(get_ms(&ms) == 0);
-  if ((last_ran + HOUSEKEEPING_INT) > ms) return;
+  if ((last_ran + HOUSEKEEPING_INT) > ms)
+    return;
 
   time_t time = (time_t)(ms / 1000);
 
@@ -621,7 +632,7 @@ void connection_housekeeping() {
          we reset its status and print a message */
       if (c->last_rcvd > 0) {
         spdlog::info("{} ({}): connection failed, attempting to reconnect",
-             print_addr(&c->src), fmt::ptr(c));
+                     print_addr(&c->src), fmt::ptr(c));
         c->last_rcvd = 0;
         c->last_sent = 0;
         c->window = WINDOW_MIN * WINDOW_MULT;
@@ -632,8 +643,9 @@ void connection_housekeeping() {
       }
 
       if (pending_reg2_conn == NULL) {
-        /* As the connection has timed out on our end, the receiver might have garbage
-           collected it. Try to re-establish it rather than send a keepalive */
+        /* As the connection has timed out on our end, the receiver might have
+           garbage collected it. Try to re-establish it rather than send a
+           keepalive */
         send_reg2(c);
       } else if (pending_reg2_conn == c) {
         send_reg1(c);
@@ -656,19 +668,19 @@ void connection_housekeeping() {
     }
 
     if (has_connected) {
-       spdlog::error("warning: no available connections");
+      spdlog::error("warning: no available connections");
     }
 
     // Timeout when all connections have failed
     if (ms > (all_failed_at + (GLOBAL_TIMEOUT * 1000))) {
       if (has_connected) {
-         spdlog::critical("Failed to re-establish any connections to {}",
-            print_addr(&srtla_addr));
+        spdlog::critical("Failed to re-establish any connections to {}",
+                         print_addr(&srtla_addr));
         exit(EXIT_FAILURE);
       }
 
-       spdlog::error("Failed to establish any initial connections to {}",
-          print_addr(&srtla_addr));
+      spdlog::error("Failed to establish any initial connections to {}",
+                    print_addr(&srtla_addr));
 
       // Walk through the list of resolved addresses
       if (addrs->ai_next) {
@@ -686,8 +698,7 @@ void connection_housekeeping() {
   last_ran = ms;
 }
 
-inline std::vector<char> get_random_bytes(size_t size)
-{
+inline std::vector<char> get_random_bytes(size_t size) {
   std::vector<char> ret;
   ret.resize(size);
 
@@ -699,15 +710,13 @@ inline std::vector<char> get_random_bytes(size_t size)
   return ret;
 }
 
-#define ARG_SRTLA_HOST  (argv[2])
-#define ARG_SRTLA_PORT  (argv[3])
-#define ARG_IPS_FILE    (argv[4])
-
-
+#define ARG_SRTLA_HOST (argv[2])
+#define ARG_SRTLA_PORT (argv[3])
+#define ARG_IPS_FILE (argv[4])
 
 int main(int argc, char **argv) {
   argparse::ArgumentParser args("srtla_send", VERSION);
-// SRT_LISTEN_PORT SRTLA_HOST SRTLA_PORT BIND_IPS_FILE
+  // SRT_LISTEN_PORT SRTLA_HOST SRTLA_PORT BIND_IPS_FILE
   args.add_argument("listen_port")
       .help("Port to bind the SRT socket to")
       .default_value((uint16_t)5000)
@@ -726,14 +735,14 @@ int main(int argc, char **argv) {
       .help("Enable verbose logging")
       .default_value(false)
       .implicit_value(true);
-  
+
   try {
-		args.parse_args(argc, argv);
-	} catch (const std::runtime_error& err) {
-		std::cerr << err.what() << std::endl;
-		std::cerr << args;
-		std::exit(1);
-	}
+    args.parse_args(argc, argv);
+  } catch (const std::runtime_error &err) {
+    std::cerr << err.what() << std::endl;
+    std::cerr << args;
+    std::exit(1);
+  }
   if (args.get<bool>("--verbose"))
     spdlog::set_level(spdlog::level::debug);
 
@@ -761,15 +770,16 @@ int main(int argc, char **argv) {
   listen_addr.sin_addr.s_addr = INADDR_ANY;
   listen_addr.sin_port = htons(port);
   listenfd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (listenfd < 0) { 
+  if (listenfd < 0) {
     spdlog::critical("Failed to create a socket");
-    exit(EXIT_FAILURE); 
+    exit(EXIT_FAILURE);
   }
 
-  int ret = bind(listenfd, (struct sockaddr *)&listen_addr, sizeof(listen_addr));
-  if (ret < 0) { 
+  int ret =
+      bind(listenfd, (struct sockaddr *)&listen_addr, sizeof(listen_addr));
+  if (ret < 0) {
     spdlog::critical("Failed to bind to port {}", port);
-    exit(EXIT_FAILURE); 
+    exit(EXIT_FAILURE);
   }
   add_active_fd(listenfd);
 
@@ -777,7 +787,8 @@ int main(int argc, char **argv) {
   std::string srtla_port = std::to_string(args.get<uint16_t>("srtla_port"));
   int connected = open_conns(srtla_host.c_str(), srtla_port.c_str());
   if (connected < 1) {
-    spdlog::critical("Failed to open and bind to any of the IP addresses in {}", source_ip_file);
+    spdlog::critical("Failed to open and bind to any of the IP addresses in {}",
+                     source_ip_file);
     exit(EXIT_FAILURE);
   }
 
@@ -788,7 +799,7 @@ int main(int argc, char **argv) {
   hints.ai_socktype = SOCK_DGRAM;
   ret = getaddrinfo(srtla_host.c_str(), srtla_port.c_str(), &hints, &addrs);
   if (ret != 0) {
-     spdlog::critical("Failed to resolve {}: {}", srtla_host, gai_strerror(ret));
+    spdlog::critical("Failed to resolve {}: {}", srtla_host, gai_strerror(ret));
     exit(EXIT_FAILURE);
   }
 
@@ -798,7 +809,7 @@ int main(int argc, char **argv) {
 
   int info_int = LOG_PKT_INT;
 
-  while(1) {
+  while (1) {
     if (do_update_conns) {
       update_conns(source_ip_file);
       do_update_conns = 0;
@@ -807,7 +818,7 @@ int main(int argc, char **argv) {
     connection_housekeeping();
 
     fd_set read_fds = active_fds;
-    struct timeval to = {.tv_sec = 0, .tv_usec = 200*1000};
+    struct timeval to = {.tv_sec = 0, .tv_usec = 200 * 1000};
     ret = select(FD_SETSIZE, &read_fds, NULL, NULL, &to);
 
     if (ret > 0) {
@@ -826,7 +837,8 @@ int main(int argc, char **argv) {
     if (info_int == 0) {
       for (conn_t *c = conns; c != NULL; c = c->next) {
         spdlog::debug("{} ({}): in flight: {}, window: {}, last_rcvd {}",
-              print_addr(&c->src), fmt::ptr(c), c->in_flight_pkts, c->window, c->last_rcvd);
+                      print_addr(&c->src), fmt::ptr(c), c->in_flight_pkts,
+                      c->window, c->last_rcvd);
       }
       info_int = LOG_PKT_INT;
     }

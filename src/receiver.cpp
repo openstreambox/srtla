@@ -1,8 +1,7 @@
 /*
-    srtla_rec - SRT transport proxy with link aggregation, forked by IRLToolkit and IRLServer
-    Copyright (C) 2020-2021 BELABOX project
-    Copyright (C) 2024 IRLToolkit Inc.
-    Copyright (C) 2025 IRLServer.com
+    srtla_rec - SRT transport proxy with link aggregation, forked by IRLToolkit
+   and IRLServer Copyright (C) 2020-2021 BELABOX project Copyright (C) 2024
+   IRLToolkit Inc. Copyright (C) 2025 IRLServer.com
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -632,8 +631,9 @@ int resolve_srt_addr(const char *host, const char *port) {
   hints.ai_socktype = SOCK_DGRAM;
   int ret = getaddrinfo(host, port, &hints, &srt_addrs);
   if (ret != 0) {
-      spdlog::error("Failed to resolve the address: {}:{}: {}", host, port, gai_strerror(ret));
-      return -1;
+    spdlog::error("Failed to resolve the address: {}:{}: {}", host, port,
+                  gai_strerror(ret));
+    return -1;
   }
 
   int tmp_sock = socket(AF_INET, SOCK_DGRAM, 0);
