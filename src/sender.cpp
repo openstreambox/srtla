@@ -441,7 +441,7 @@ conn_t *conn_find_by_src(struct sockaddr *src) {
 int setup_conns(char *source_ip_file) {
   FILE *config = fopen(source_ip_file, "r");
   if (config == NULL) {
-    spdlog::error("Failed to open the source ip file {}", source_ip_file);
+    spdlog::critical("Failed to open the source ip file {}", source_ip_file);
     exit(EXIT_FAILURE);
   }
 
@@ -662,7 +662,7 @@ void connection_housekeeping() {
     // Timeout when all connections have failed
     if (ms > (all_failed_at + (GLOBAL_TIMEOUT * 1000))) {
       if (has_connected) {
-         spdlog::error("Failed to re-establish any connections to {}",
+         spdlog::critical("Failed to re-establish any connections to {}",
             print_addr(&srtla_addr));
         exit(EXIT_FAILURE);
       }
@@ -741,7 +741,7 @@ int main(int argc, char **argv) {
   source_ip_file = (char *)ips_file.c_str();
   int conn_count = setup_conns(source_ip_file);
   if (conn_count <= 0) {
-    spdlog::error("Failed to parse any IP addresses in {}", source_ip_file);
+    spdlog::critical("Failed to parse any IP addresses in {}", source_ip_file);
     exit(EXIT_FAILURE);
   }
 
@@ -762,13 +762,13 @@ int main(int argc, char **argv) {
   listen_addr.sin_port = htons(port);
   listenfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (listenfd < 0) { 
-    spdlog::error("Failed to create a socket");
+    spdlog::critical("Failed to create a socket");
     exit(EXIT_FAILURE); 
   }
 
   int ret = bind(listenfd, (struct sockaddr *)&listen_addr, sizeof(listen_addr));
   if (ret < 0) { 
-    spdlog::error("Failed to bind to port {}", port);
+    spdlog::critical("Failed to bind to port {}", port);
     exit(EXIT_FAILURE); 
   }
   add_active_fd(listenfd);
@@ -777,7 +777,7 @@ int main(int argc, char **argv) {
   std::string srtla_port = std::to_string(args.get<uint16_t>("srtla_port"));
   int connected = open_conns(srtla_host.c_str(), srtla_port.c_str());
   if (connected < 1) {
-    spdlog::error("Failed to open and bind to any of the IP addresses in {}", source_ip_file);
+    spdlog::critical("Failed to open and bind to any of the IP addresses in {}", source_ip_file);
     exit(EXIT_FAILURE);
   }
 
@@ -788,7 +788,7 @@ int main(int argc, char **argv) {
   hints.ai_socktype = SOCK_DGRAM;
   ret = getaddrinfo(srtla_host.c_str(), srtla_port.c_str(), &hints, &addrs);
   if (ret != 0) {
-     spdlog::error("Failed to resolve {}: {}", srtla_host, gai_strerror(ret));
+     spdlog::critical("Failed to resolve {}: {}", srtla_host, gai_strerror(ret));
     exit(EXIT_FAILURE);
   }
 
