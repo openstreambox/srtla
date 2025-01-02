@@ -1,7 +1,8 @@
 /*
-    irltk_srtla_rec - SRT transport proxy with link aggregation, forked by IRLToolkit
+    srtla_rec - SRT transport proxy with link aggregation, forked by IRLToolkit and IRLServer
     Copyright (C) 2020-2021 BELABOX project
     Copyright (C) 2024 IRLToolkit Inc.
+    Copyright (C) 2025 IRLServer.com
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -39,12 +40,12 @@ extern "C" {
 #define SRT_SOCKET_INFO_PREFIX "/tmp/srtla-group-"
 
 struct srtla_conn {
-    struct sockaddr addr = {};
+    struct sockaddr_storage addr;
     time_t last_rcvd = 0;
     int recv_idx = 0;
     std::array<uint32_t, RECV_ACK_INT> recv_log;
 
-    srtla_conn(struct sockaddr &_addr, time_t ts);
+    srtla_conn(struct sockaddr_storage &_addr, time_t ts);
 };
 typedef std::shared_ptr<srtla_conn> srtla_conn_ptr;
 
@@ -53,12 +54,12 @@ struct srtla_conn_group {
     std::vector<srtla_conn_ptr> conns;
     time_t created_at = 0;
     int srt_sock = -1;
-    struct sockaddr last_addr = {};
+    struct sockaddr_storage last_addr = {};
 
     srtla_conn_group(char *client_id, time_t ts);
     ~srtla_conn_group();
 
-    std::vector<struct sockaddr> get_client_addresses();
+    std::vector<struct sockaddr_storage> get_client_addresses();
     void write_socket_info_file();
     void remove_socket_info_file();
 };

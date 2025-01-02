@@ -1,7 +1,8 @@
 /*
-    irltk_srtla_rec - SRT transport proxy with link aggregation, forked by IRLToolkit
+    srtla_rec - SRT transport proxy with link aggregation, forked by IRLToolkit and IRLServer
     Copyright (C) 2020-2021 BELABOX project
     Copyright (C) 2024 IRLToolkit Inc.
+    Copyright (C) 2025 IRLServer.com
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -17,32 +18,33 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <endian.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/epoll.h>
+#include <endian.h>
 #include <errno.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-#include <cstring>
-#include <cassert>
-#include <vector>
 #include <algorithm>
+#include <cassert>
+#include <cstring>
 #include <fstream>
+#include <vector>
 
 #include <argparse/argparse.hpp>
 
 #include "main.h"
 
 int srtla_sock;
-struct sockaddr srt_addr;
-const socklen_t addr_len = sizeof(struct sockaddr);
+// Use sockaddr_storage to handle both IPv4 and IPv6
+struct sockaddr_storage srt_addr;
+const socklen_t addr_len = sizeof(struct sockaddr_storage);
 
 std::vector<srtla_conn_group_ptr> conn_groups;
 
@@ -54,7 +56,7 @@ Async I/O support
 int socket_epoll;
 
 int epoll_add(int fd, uint32_t events, void *priv_data) {
-  struct epoll_event ev={0};
+  struct epoll_event ev = {0};
   ev.events = events;
   ev.data.ptr = priv_data;
   return epoll_ctl(socket_epoll, EPOLL_CTL_ADD, fd, &ev);
@@ -81,8 +83,7 @@ int const_time_cmp(const void *a, const void *b, int len) {
   return diff ? -1 : 0;
 }
 
-inline std::vector<char> get_random_bytes(size_t size)
-{
+inline std::vector<char> get_random_bytes(size_t size) {
   std::vector<char> ret;
   ret.resize(size);
 
@@ -94,18 +95,17 @@ inline std::vector<char> get_random_bytes(size_t size)
   return ret;
 }
 
-uint16_t get_sock_local_port(int fd)
-{
-  struct sockaddr_in local_addr = {};
+uint16_t get_sock_local_port(int fd) {
+  struct sockaddr_in6 local_addr = {};
   socklen_t local_addr_len = sizeof(local_addr);
   getsockname(fd, (struct sockaddr *)&local_addr, &local_addr_len);
-  return ntohs(local_addr.sin_port);
+  return ntohs(local_addr.sin6_port);
 }
 
-inline void srtla_send_reg_err(struct sockaddr *addr)
-{
+inline void srtla_send_reg_err(struct sockaddr_storage *addr) {
   uint16_t header = htobe16(SRTLA_TYPE_REG_ERR);
-  sendto(srtla_sock, &header, sizeof(header), 0, addr, addr_len);
+  sendto(srtla_sock, &header, sizeof(header), 0, (struct sockaddr *)addr,
+         addr_len);
 }
 
 /*
@@ -119,16 +119,42 @@ srtla_conn_group_ptr group_find_by_id(char *id) {
   return nullptr;
 }
 
-void group_find_by_addr(struct sockaddr *addr, srtla_conn_group_ptr &rg, srtla_conn_ptr &rc) {
+void group_find_by_addr(struct sockaddr_storage *addr, srtla_conn_group_ptr &rg,
+                        srtla_conn_ptr &rc) {
   for (auto &group : conn_groups) {
     for (auto &conn : group->conns) {
-      if (const_time_cmp(&(conn->addr), addr, addr_len) == 0) {
+      if (conn->addr.ss_family == addr->ss_family &&
+          ((conn->addr.ss_family == AF_INET6 &&
+            const_time_cmp(&((struct sockaddr_in6 *)(&conn->addr))->sin6_addr,
+                           &((struct sockaddr_in6 *)addr)->sin6_addr,
+                           sizeof(struct in6_addr)) == 0 &&
+            ((struct sockaddr_in6 *)(&conn->addr))->sin6_port ==
+                ((struct sockaddr_in6 *)addr)->sin6_port) ||
+           (conn->addr.ss_family == AF_INET &&
+            const_time_cmp(&((struct sockaddr_in *)(&conn->addr))->sin_addr,
+                           &((struct sockaddr_in *)addr)->sin_addr,
+                           sizeof(struct in_addr)) == 0 &&
+            ((struct sockaddr_in *)(&conn->addr))->sin_port ==
+                ((struct sockaddr_in *)addr)->sin_port))) {
         rg = group;
         rc = conn;
         return;
       }
     }
-    if (const_time_cmp(&group->last_addr, addr, addr_len) == 0) {
+    if (group->last_addr.ss_family == addr->ss_family &&
+        ((group->last_addr.ss_family == AF_INET6 &&
+          const_time_cmp(
+              &((struct sockaddr_in6 *)(&group->last_addr))->sin6_addr,
+              &((struct sockaddr_in6 *)addr)->sin6_addr,
+              sizeof(struct in6_addr)) == 0 &&
+          ((struct sockaddr_in6 *)(&group->last_addr))->sin6_port ==
+              ((struct sockaddr_in6 *)addr)->sin6_port) ||
+         (group->last_addr.ss_family == AF_INET &&
+          const_time_cmp(&((struct sockaddr_in *)(&group->last_addr))->sin_addr,
+                         &((struct sockaddr_in *)addr)->sin_addr,
+                         sizeof(struct in_addr)) == 0 &&
+          ((struct sockaddr_in *)(&group->last_addr))->sin_port ==
+              ((struct sockaddr_in *)addr)->sin_port))) {
       rg = group;
       rc = nullptr;
       return;
@@ -138,28 +164,25 @@ void group_find_by_addr(struct sockaddr *addr, srtla_conn_group_ptr &rg, srtla_c
   rc = nullptr;
 }
 
-srtla_conn::srtla_conn(struct sockaddr &_addr, time_t ts) :
-  addr(_addr),
-  last_rcvd(ts)
-{
+srtla_conn::srtla_conn(struct sockaddr_storage &_addr, time_t ts)
+    : addr(_addr), last_rcvd(ts) {
   recv_log.fill(0);
 }
 
-srtla_conn_group::srtla_conn_group(char *client_id, time_t ts) :
-  created_at(ts)
-{
+srtla_conn_group::srtla_conn_group(char *client_id, time_t ts)
+    : created_at(ts) {
   id.fill(0);
 
   // Copy client ID to first half of id buffer
   std::memcpy(id.begin(), client_id, SRTLA_ID_LEN / 2);
 
   // Generate server ID, then copy to last half of id buffer
-  auto server_id = get_random_bytes(SRTLA_ID_LEN / 2); 
-  std::copy(server_id.begin(), server_id.end(), id.begin() + (SRTLA_ID_LEN / 2));
+  auto server_id = get_random_bytes(SRTLA_ID_LEN / 2);
+  std::copy(server_id.begin(), server_id.end(),
+            id.begin() + (SRTLA_ID_LEN / 2));
 }
 
-srtla_conn_group::~srtla_conn_group()
-{
+srtla_conn_group::~srtla_conn_group() {
   conns.clear();
 
   if (srt_sock > 0) {
@@ -169,47 +192,50 @@ srtla_conn_group::~srtla_conn_group()
   }
 }
 
-std::vector<struct sockaddr> srtla_conn_group::get_client_addresses()
-{
-  std::vector<struct sockaddr> ret;
-  for (auto conn : conns)
-    ret.emplace_back(conn->addr);
+std::vector<struct sockaddr_storage> srtla_conn_group::get_client_addresses() {
+  std::vector<struct sockaddr_storage> ret;
+  for (auto conn : conns) {
+    ret.push_back(conn->addr);
+  }
   return ret;
 }
 
-void srtla_conn_group::write_socket_info_file()
-{
+void srtla_conn_group::write_socket_info_file() {
   if (srt_sock == -1)
     return;
 
   uint16_t local_port = get_sock_local_port(srt_sock);
-  std::string file_name = std::string(SRT_SOCKET_INFO_PREFIX) + std::to_string(local_port);
+  std::string file_name =
+      std::string(SRT_SOCKET_INFO_PREFIX) + std::to_string(local_port);
 
   auto client_addresses = get_client_addresses();
 
   std::ofstream f(file_name);
   for (auto &addr : client_addresses)
-    f << print_addr(&addr) << std::endl;
+    f << print_addr((struct sockaddr *)&addr) << std::endl;
   f.close();
 
-  spdlog::debug("[Group: {}] Wrote SRTLA socket info file", static_cast<void *>(this));
+  spdlog::debug("[Group: {}] Wrote SRTLA socket info file",
+                static_cast<void *>(this));
 }
 
-void srtla_conn_group::remove_socket_info_file()
-{
+void srtla_conn_group::remove_socket_info_file() {
   if (srt_sock == -1)
     return;
 
   uint16_t local_port = get_sock_local_port(srt_sock);
-  std::string file_name = std::string(SRT_SOCKET_INFO_PREFIX) + std::to_string(local_port);
+  std::string file_name =
+      std::string(SRT_SOCKET_INFO_PREFIX) + std::to_string(local_port);
 
   std::remove(file_name.c_str());
 }
 
-int register_group(struct sockaddr *addr, char *in_buf, time_t ts) {
+int register_group(struct sockaddr_storage *addr, char *in_buf, time_t ts) {
   if (conn_groups.size() >= MAX_GROUPS) {
     srtla_send_reg_err(addr);
-    spdlog::error("[{}:{}] Group registration failed: Max groups reached", print_addr(addr), port_no(addr));
+    spdlog::error("[{}:{}] Group registration failed: Max groups reached",
+                  print_addr((struct sockaddr *)addr),
+                  port_no((struct sockaddr *)addr));
     return -1;
   }
 
@@ -219,7 +245,10 @@ int register_group(struct sockaddr *addr, char *in_buf, time_t ts) {
   group_find_by_addr(addr, group, conn);
   if (group) {
     srtla_send_reg_err(addr);
-    spdlog::error("[{}:{}] Group registration failed: Remote address already registered to group", print_addr(addr), port_no(addr));
+    spdlog::error("[{}:{}] Group registration failed: Remote address already "
+                  "registered to group",
+                  print_addr((struct sockaddr *)addr),
+                  port_no((struct sockaddr *)addr));
     return -1;
   }
 
@@ -238,35 +267,44 @@ int register_group(struct sockaddr *addr, char *in_buf, time_t ts) {
   std::memcpy(out_buf + sizeof(header), group->id.begin(), SRTLA_ID_LEN);
 
   // Send the REG2 packet
-  int ret = sendto(srtla_sock, &out_buf, sizeof(out_buf), 0, addr, addr_len);
+  int ret = sendto(srtla_sock, &out_buf, sizeof(out_buf), 0,
+                   (const sockaddr *)addr, addr_len);
   if (ret != sizeof(out_buf)) {
-    spdlog::error("[{}:{}] Group registration failed: Send error", print_addr(addr), port_no(addr));
+    spdlog::error("[{}:{}] Group registration failed: Send error",
+                  print_addr((struct sockaddr *)addr),
+                  port_no((struct sockaddr *)addr));
     return -1;
   }
 
   conn_groups.push_back(group);
 
-  spdlog::info("[{}:{}] [Group: {}] Group registered", print_addr(addr), port_no(addr), static_cast<void *>(group.get()));
+  spdlog::info("[{}:{}] [Group: {}] Group registered",
+               print_addr((struct sockaddr *)addr),
+               port_no((struct sockaddr *)addr),
+               static_cast<void *>(group.get()));
   return 0;
 }
 
-void remove_group(srtla_conn_group_ptr group)
-{
+void remove_group(srtla_conn_group_ptr group) {
   if (!group)
     return;
 
-  conn_groups.erase(std::remove(conn_groups.begin(), conn_groups.end(), group), conn_groups.end());
+  conn_groups.erase(std::remove(conn_groups.begin(), conn_groups.end(), group),
+                    conn_groups.end());
 
   group.reset();
 }
 
-int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
+int conn_reg(struct sockaddr_storage *addr, char *in_buf, time_t ts) {
   char *id = in_buf + 2;
   srtla_conn_group_ptr group = group_find_by_id(id);
   if (!group) {
     uint16_t header = htobe16(SRTLA_TYPE_REG_NGP);
-    sendto(srtla_sock, &header, sizeof(header), 0, addr, addr_len);
-    spdlog::error("[{}:{}] Connection registration failed: No group found", print_addr(addr), port_no(addr));
+    sendto(srtla_sock, &header, sizeof(header), 0, (const sockaddr *)addr,
+           addr_len);
+    spdlog::error("[{}:{}] Connection registration failed: No group found",
+                  print_addr((struct sockaddr *)addr),
+                  port_no((struct sockaddr *)addr));
     return -1;
   }
 
@@ -277,7 +315,11 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
   group_find_by_addr(addr, tmp, conn);
   if (tmp && tmp != group) {
     srtla_send_reg_err(addr);
-    spdlog::error("[{}:{}] [Group: {}] Connection registration failed: Provided group ID mismatch", print_addr(addr), port_no(addr), static_cast<void *>(group.get()));
+    spdlog::error("[{}:{}] [Group: {}] Connection registration failed: "
+                  "Provided group ID mismatch",
+                  print_addr((struct sockaddr *)addr),
+                  port_no((struct sockaddr *)addr),
+                  static_cast<void *>(group.get()));
     return -1;
   }
 
@@ -287,7 +329,11 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
   if (!conn) {
     if (group->conns.size() >= MAX_CONNS_PER_GROUP) {
       srtla_send_reg_err(addr);
-      spdlog::error("[{}:{}] [Group: {}] Connection registration failed: Max group conns reached", print_addr(addr), port_no(addr), static_cast<void *>(group.get()));
+      spdlog::error("[{}:{}] [Group: {}] Connection registration failed: Max "
+                    "group conns reached",
+                    print_addr((struct sockaddr *)addr),
+                    port_no((struct sockaddr *)addr),
+                    static_cast<void *>(group.get()));
       return -1;
     }
 
@@ -296,9 +342,13 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
   }
 
   uint16_t header = htobe16(SRTLA_TYPE_REG3);
-  int ret = sendto(srtla_sock, &header, sizeof(header), 0, addr, addr_len);
+  int ret = sendto(srtla_sock, &header, sizeof(header), 0,
+                   (const sockaddr *)addr, addr_len);
   if (ret != sizeof(header)) {
-    spdlog::error("[{}:{}] [Group: {}] Connection registration failed: Socket send error", print_addr(addr), port_no(addr), static_cast<void *>(group.get()));
+    spdlog::error(
+        "[{}:{}] [Group: {}] Connection registration failed: Socket send error",
+        print_addr((struct sockaddr *)addr), port_no((struct sockaddr *)addr),
+        static_cast<void *>(group.get()));
     return -1;
   }
 
@@ -310,7 +360,10 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
   // If it all worked, mark this peer as the most recently active one
   group->last_addr = *addr;
 
-  spdlog::info("[{}:{}] [Group: {}] Connection registration", print_addr(addr), port_no(addr), static_cast<void *>(group.get()));
+  spdlog::info("[{}:{}] [Group: {}] Connection registration",
+               print_addr((struct sockaddr *)addr),
+               port_no((struct sockaddr *)addr),
+               static_cast<void *>(group.get()));
   return 0;
 }
 
@@ -325,7 +378,9 @@ void handle_srt_data(srtla_conn_group_ptr g) {
 
   int n = recv(g->srt_sock, &buf, MTU, 0);
   if (n < SRT_MIN_LEN) {
-    spdlog::error("[Group: {}] Failed to read the SRT sock, terminating the group", static_cast<void *>(g.get()));
+    spdlog::error(
+        "[Group: {}] Failed to read the SRT sock, terminating the group",
+        static_cast<void *>(g.get()));
     remove_group(g);
     return;
   }
@@ -334,31 +389,45 @@ void handle_srt_data(srtla_conn_group_ptr g) {
   if (is_srt_ack(buf, n)) {
     // Broadcast SRT ACKs over all connections for timely delivery
     for (auto &conn : g->conns) {
-      int ret = sendto(srtla_sock, &buf, n, 0, &conn->addr, addr_len);
+      int ret = sendto(srtla_sock, &buf, n, 0, (struct sockaddr *)&conn->addr,
+                       addr_len);
       if (ret != n)
-        spdlog::error("[{}:{}] [Group: {}] Failed to send the SRT ack", print_addr(&conn->addr), port_no(&conn->addr), static_cast<void *>(g.get()));
+        spdlog::error("[{}:{}] [Group: {}] Failed to send the SRT ack",
+                      print_addr((struct sockaddr *)&conn->addr),
+                      port_no((struct sockaddr *)&conn->addr),
+                      static_cast<void *>(g.get()));
     }
   } else {
     // send other packets over the most recently used SRTLA connection
-    int ret = sendto(srtla_sock, &buf, n, 0, &g->last_addr, addr_len);
+    int ret = sendto(srtla_sock, &buf, n, 0, (struct sockaddr *)&g->last_addr,
+                     addr_len);
     if (ret != n) {
-      spdlog::error("[{}:{}] [Group: {}] Failed to send the SRT packet", print_addr(&g->last_addr), port_no(&g->last_addr), static_cast<void *>(g.get()));
+      spdlog::error("[{}:{}] [Group: {}] Failed to send the SRT packet",
+                    print_addr((struct sockaddr *)&g->last_addr),
+                    port_no((struct sockaddr *)&g->last_addr),
+                    static_cast<void *>(g.get()));
     }
   }
 }
 
-void register_packet(srtla_conn_group_ptr group, srtla_conn_ptr conn, int32_t sn) {
+void register_packet(srtla_conn_group_ptr group, srtla_conn_ptr conn,
+                     int32_t sn) {
   // store the sequence numbers in BE, as they're transmitted over the network
   conn->recv_log[conn->recv_idx++] = htobe32(sn);
 
   if (conn->recv_idx == RECV_ACK_INT) {
     srtla_ack_pkt ack;
     ack.type = htobe32(SRTLA_TYPE_ACK << 16);
-    std::memcpy(&ack.acks, conn->recv_log.begin(), sizeof(uint32_t) * conn->recv_log.max_size());
+    std::memcpy(&ack.acks, conn->recv_log.begin(),
+                sizeof(uint32_t) * conn->recv_log.max_size());
 
-    int ret = sendto(srtla_sock, &ack, sizeof(ack), 0, &conn->addr, addr_len);
+    int ret = sendto(srtla_sock, &ack, sizeof(ack), 0,
+                     (struct sockaddr *)&conn->addr, addr_len);
     if (ret != sizeof(ack)) {
-      spdlog::error("[{}:{}] [Group: {}] Failed to send the SRTLA ACK", print_addr(&conn->addr), port_no(&conn->addr), static_cast<void *>(group.get()));
+      spdlog::error("[{}:{}] [Group: {}] Failed to send the SRTLA ACK",
+                    print_addr((struct sockaddr *)&conn->addr),
+                    port_no((struct sockaddr *)&conn->addr),
+                    static_cast<void *>(group.get()));
     }
 
     conn->recv_idx = 0;
@@ -369,9 +438,10 @@ void handle_srtla_data(time_t ts) {
   char buf[MTU] = {};
 
   // Get the packet
-  struct sockaddr srtla_addr;
+  struct sockaddr_storage srtla_addr;
   socklen_t len = addr_len;
-  int n = recvfrom(srtla_sock, &buf, MTU, 0, &srtla_addr, &len);
+  int n =
+      recvfrom(srtla_sock, &buf, MTU, 0, (struct sockaddr *)&srtla_addr, &len);
   if (n < 0) {
     spdlog::error("Failed to read an srtla packet");
     return;
@@ -400,15 +470,21 @@ void handle_srtla_data(time_t ts) {
 
   // Resend SRTLA keep-alive packets to the sender
   if (is_srtla_keepalive(buf, n)) {
-    int ret = sendto(srtla_sock, &buf, n, 0, &srtla_addr, addr_len);
+    int ret = sendto(srtla_sock, &buf, n, 0, (struct sockaddr *)&srtla_addr,
+                     addr_len);
     if (ret != n) {
-      spdlog::error("[{}:{}] [Group: {}] Failed to send SRTLA Keepalive", print_addr(&srtla_addr), port_no(&srtla_addr), static_cast<void *>(g.get()));
+      spdlog::error("[{}:{}] [Group: {}] Failed to send SRTLA Keepalive",
+                    print_addr((struct sockaddr *)&srtla_addr),
+                    port_no((struct sockaddr *)&srtla_addr),
+                    static_cast<void *>(g.get()));
     }
     return;
   }
 
-  // Check that the packet is large enough to be an SRT packet, discard otherwise
-  if (n < SRT_MIN_LEN) return;
+  // Check that the packet is large enough to be an SRT packet, discard
+  // otherwise
+  if (n < SRT_MIN_LEN)
+    return;
 
   // Record the most recently active peer
   g->last_addr = srtla_addr;
@@ -423,25 +499,36 @@ void handle_srtla_data(time_t ts) {
   if (g->srt_sock < 0) {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-      spdlog::error("[Group: {}] Failed to create an SRT socket", static_cast<void *>(g.get()));
+      spdlog::error("[Group: {}] Failed to create an SRT socket",
+                    static_cast<void *>(g.get()));
       remove_group(g);
       return;
     }
     g->srt_sock = sock;
 
-    int ret = connect(sock, &srt_addr, addr_len);
-    if (ret != 0) {
-      spdlog::error("[Group: {}] Failed to connect() to the SRT socket", static_cast<void *>(g.get()));
+    int ret = 0;
+    // Connect using the appropriate address family
+    if (srt_addr.ss_family == AF_INET) {
+      ret = connect(sock, (struct sockaddr *)&srt_addr,
+                    sizeof(struct sockaddr_in));
+    } else if (srt_addr.ss_family == AF_INET6) {
+      ret = connect(sock, (struct sockaddr *)&srt_addr,
+                    sizeof(struct sockaddr_in6));
+    } else {
+      spdlog::error("[Group: {}] Invalid address family for SRT server",
+                    static_cast<void *>(g.get()));
       remove_group(g);
       return;
     }
 
     uint16_t local_port = get_sock_local_port(sock);
-    spdlog::info("[Group: {}] Created SRT socket. Local Port: {}", static_cast<void *>(g.get()), local_port);
+    spdlog::info("[Group: {}] Created SRT socket. Local Port: {}",
+                 static_cast<void *>(g.get()), local_port);
 
     ret = epoll_add(sock, EPOLLIN, g.get());
     if (ret != 0) {
-      spdlog::error("[Group: {}] Failed to add the SRT socket to the epoll", static_cast<void *>(g.get()));
+      spdlog::error("[Group: {}] Failed to add the SRT socket to the epoll",
+                    static_cast<void *>(g.get()));
       remove_group(g);
       return;
     }
@@ -452,7 +539,9 @@ void handle_srtla_data(time_t ts) {
 
   int ret = send(g->srt_sock, &buf, n, 0);
   if (ret != n) {
-    spdlog::error("[Group: {}] Failed to forward SRTLA packet, terminating the group", static_cast<void *>(g.get()));
+    spdlog::error(
+        "[Group: {}] Failed to forward SRTLA packet, terminating the group",
+        static_cast<void *>(g.get()));
     remove_group(g);
   }
 }
@@ -482,18 +571,23 @@ void cleanup_groups_connections(time_t ts) {
   int removed_groups = 0;
   int removed_conns = 0;
 
-  for (std::vector<srtla_conn_group_ptr>::iterator git = conn_groups.begin(); git != conn_groups.end();) {
+  for (std::vector<srtla_conn_group_ptr>::iterator git = conn_groups.begin();
+       git != conn_groups.end();) {
     auto group = *git;
 
     size_t before_conns = group->conns.size();
     total_conns += before_conns;
-    for (std::vector<srtla_conn_ptr>::iterator cit = group->conns.begin(); cit != group->conns.end();) {
+    for (std::vector<srtla_conn_ptr>::iterator cit = group->conns.begin();
+         cit != group->conns.end();) {
       auto conn = *cit;
 
       if ((conn->last_rcvd + CONN_TIMEOUT) < ts) {
         cit = group->conns.erase(cit);
         removed_conns++;
-        spdlog::info("[{}:{}] [Group: {}] Connection removed (timed out)", print_addr(&conn->addr), port_no(&conn->addr), static_cast<void *>(group.get()));
+        spdlog::info("[{}:{}] [Group: {}] Connection removed (timed out)",
+                     print_addr((struct sockaddr *)&conn->addr),
+                     port_no((struct sockaddr *)&conn->addr),
+                     static_cast<void *>(group.get()));
       } else {
         cit++;
       }
@@ -502,7 +596,8 @@ void cleanup_groups_connections(time_t ts) {
     if (!group->conns.size() && (group->created_at + GROUP_TIMEOUT) < ts) {
       git = conn_groups.erase(git);
       removed_groups++;
-      spdlog::info("[Group: {}] Group removed (no connections)", static_cast<void *>(group.get()));
+      spdlog::info("[Group: {}] Group removed (no connections)",
+                   static_cast<void *>(group.get()));
     } else {
       if (before_conns != group->conns.size())
         group->write_socket_info_file();
@@ -510,7 +605,9 @@ void cleanup_groups_connections(time_t ts) {
     }
   }
 
-  spdlog::debug("Clean up run ended. Counted {} groups and {} connections. Removed {} groups and {} connections", total_groups, total_conns, removed_groups, removed_conns);
+  spdlog::debug("Clean up run ended. Counted {} groups and {} connections. "
+                "Removed {} groups and {} connections",
+                total_groups, total_conns, removed_groups, removed_conns);
 }
 
 /*
@@ -546,7 +643,7 @@ int resolve_srt_addr(const char *host, const char *port) {
     return -1;
   }
 
-  struct timeval to = { .tv_sec = 1, .tv_usec = 0};
+  struct timeval to = {.tv_sec = 1, .tv_usec = 0};
   ret = setsockopt(tmp_sock, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));
   if (ret != 0) {
     spdlog::error("Failed to set a socket timeout");
@@ -554,10 +651,18 @@ int resolve_srt_addr(const char *host, const char *port) {
   }
 
   int found = -1;
-  for (struct addrinfo *addr = srt_addrs; addr != NULL && found == -1; addr = addr->ai_next) {
-    spdlog::info("Trying to connect to SRT at {}:{}...", print_addr(addr->ai_addr), port);
-
-    ret = connect(tmp_sock, addr->ai_addr, addr->ai_addrlen);
+  for (struct addrinfo *addr = srt_addrs; addr != NULL && found == -1;
+       addr = addr->ai_next) {
+    spdlog::info("Trying to connect to SRT at {}:{}...",
+                 print_addr((struct sockaddr *)addr->ai_addr), port);
+    if (addr->ai_family == AF_INET) {
+      ret = connect(tmp_sock, addr->ai_addr, sizeof(struct sockaddr_in));
+    } else if (addr->ai_family == AF_INET6) {
+      ret = connect(tmp_sock, addr->ai_addr, sizeof(struct sockaddr_in6));
+    } else {
+      spdlog::warn("Unsupported address family, skipping");
+      continue;
+    }
     if (ret == 0) {
       ret = send(tmp_sock, &hs_packet, sizeof(hs_packet), 0);
       if (ret == sizeof(hs_packet)) {
@@ -565,7 +670,13 @@ int resolve_srt_addr(const char *host, const char *port) {
         ret = recv(tmp_sock, &buf, MTU, 0);
         if (ret == sizeof(hs_packet)) {
           spdlog::info("Success");
-          srt_addr = *addr->ai_addr;
+          // Copy the successful address to srt_addr
+          if (addr->ai_family == AF_INET) {
+            memcpy(&srt_addr, addr->ai_addr, sizeof(struct sockaddr_in));
+          } else {
+            // AF_INET6
+            memcpy(&srt_addr, addr->ai_addr, sizeof(struct sockaddr_in6));
+          }
           found = 1;
         }
       } // ret == sizeof(buf)
@@ -578,8 +689,15 @@ int resolve_srt_addr(const char *host, const char *port) {
   close(tmp_sock);
 
   if (found == -1) {
-    srt_addr = *srt_addrs->ai_addr;
-    spdlog::warn("Failed to confirm that a SRT server is reachable at any address. Proceeding with the first address: {}", print_addr(&srt_addr));
+    // If no successful connection, default to the first address
+    if (srt_addrs->ai_family == AF_INET) {
+      memcpy(&srt_addr, srt_addrs->ai_addr, sizeof(struct sockaddr_in));
+    } else if (srt_addrs->ai_family == AF_INET6) {
+      memcpy(&srt_addr, srt_addrs->ai_addr, sizeof(struct sockaddr_in6));
+    }
+    spdlog::warn("Failed to confirm that a SRT server is reachable at any "
+                 "address. Proceeding with the first address: {}",
+                 print_addr((struct sockaddr *)&srt_addr));
     found = 0;
   }
 
@@ -589,20 +707,31 @@ int resolve_srt_addr(const char *host, const char *port) {
 }
 
 int main(int argc, char **argv) {
-  argparse::ArgumentParser args("irltk_srtla_rec", VERSION);
+  argparse::ArgumentParser args("srtla_rec", VERSION);
 
-  args.add_argument("--srtla_port").help("Port to bind the SRTLA socket to").default_value((uint16_t)5000).scan<'d', uint16_t>();
-  args.add_argument("--srt_hostname").help("Hostname of the downstream SRT server").default_value(std::string{"127.0.0.1"});
-  args.add_argument("--srt_port").help("Port of the downstream SRT server").default_value((uint16_t)5001).scan<'d', uint16_t>();
-  args.add_argument("--verbose").help("Enable verbose logging").default_value(false).implicit_value(true);
+  args.add_argument("--srtla_port")
+      .help("Port to bind the SRTLA socket to")
+      .default_value((uint16_t)5000)
+      .scan<'d', uint16_t>();
+  args.add_argument("--srt_hostname")
+      .help("Hostname of the downstream SRT server")
+      .default_value(std::string{"127.0.0.1"});
+  args.add_argument("--srt_port")
+      .help("Port of the downstream SRT server")
+      .default_value((uint16_t)5001)
+      .scan<'d', uint16_t>();
+  args.add_argument("--verbose")
+      .help("Enable verbose logging")
+      .default_value(false)
+      .implicit_value(true);
 
   try {
-		args.parse_args(argc, argv);
-	} catch (const std::runtime_error& err) {
-		std::cerr << err.what() << std::endl;
-		std::cerr << args;
-		std::exit(1);
-	}
+    args.parse_args(argc, argv);
+  } catch (const std::runtime_error &err) {
+    std::cerr << err.what() << std::endl;
+    std::cerr << args;
+    std::exit(1);
+  }
 
   uint16_t srtla_port = args.get<uint16_t>("--srtla_port");
   std::string srt_hostname = args.get<std::string>("--srt_hostname");
@@ -625,26 +754,37 @@ int main(int argc, char **argv) {
   }
 
   // Set up the listener socket for incoming SRT connections
-  srtla_sock = socket(AF_INET, SOCK_DGRAM, 0);
+  int srtla_sock = socket(AF_INET6, SOCK_DGRAM, 0);
   if (srtla_sock < 0) {
     spdlog::critical("SRTLA socket creation failed");
     exit(EXIT_FAILURE);
   }
 
+  // Disable IPV6_V6ONLY
+  int v6only = 0;
+  ret = setsockopt(srtla_sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only,
+                   sizeof(v6only));
+  if (ret < 0) {
+    spdlog::critical("Failed to set IPV6_V6ONLY option");
+    exit(EXIT_FAILURE);
+  }
+
   // Set receive buffer size to 32MB
   int rcv_buf = 32 * 1024 * 1024;
-  ret = setsockopt(srtla_sock, SOL_SOCKET, SO_RCVBUF, &rcv_buf, sizeof(rcv_buf));
+  ret =
+      setsockopt(srtla_sock, SOL_SOCKET, SO_RCVBUF, &rcv_buf, sizeof(rcv_buf));
   if (ret < 0) {
     spdlog::critical("Failed to set SRTLA socket receive buffer size");
     exit(EXIT_FAILURE);
   }
 
-  // TODO: IPv6 listener
-  struct sockaddr_in listen_addr = {};
-  listen_addr.sin_family = AF_INET;
-  listen_addr.sin_addr.s_addr = INADDR_ANY;
-  listen_addr.sin_port = htons(srtla_port);
-  ret = bind(srtla_sock, (const struct sockaddr *)&listen_addr, addr_len);
+  struct sockaddr_in6 listen_addr = {};
+  listen_addr.sin6_family = AF_INET6;
+  listen_addr.sin6_addr = in6addr_any;
+  // Use the original srtla_port
+  listen_addr.sin6_port = htons(srtla_port);
+  ret = bind(srtla_sock, (const struct sockaddr *)&listen_addr,
+             sizeof(listen_addr));
   if (ret < 0) {
     spdlog::critical("SRTLA socket bind failed");
     exit(EXIT_FAILURE);
@@ -656,9 +796,9 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  spdlog::info("irltk_srtla_rec is now running");
+  spdlog::info("srtla_rec is now running");
 
-  while(true) {
+  while (true) {
     struct epoll_event events[MAX_EPOLL_EVENTS];
     int eventcnt = epoll_wait(socket_epoll, events, MAX_EPOLL_EVENTS, 1000);
 
@@ -687,4 +827,3 @@ int main(int argc, char **argv) {
     cleanup_groups_connections(ts);
   }
 }
-
