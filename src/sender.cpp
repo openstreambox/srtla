@@ -31,13 +31,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "sender.h"
-
 #include <argparse/argparse.hpp>
 
 #include "sender.h"
 
-#define PKT_LOG_SZ 256
 #define CONN_TIMEOUT 4
 #define REG2_TIMEOUT 4
 #define REG3_TIMEOUT 4
