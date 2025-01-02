@@ -626,15 +626,14 @@ int resolve_srt_addr(const char *host, const char *port) {
   hs_packet.ext_field = htobe16(2);
   hs_packet.handshake_type = htobe32(1);
 
-  struct addrinfo hints;
+  struct addrinfo hints, *srt_addrs;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
+  hints.ai_family = AF_UNSPEC; // Allow IPv4 or IPv6
   hints.ai_socktype = SOCK_DGRAM;
-  struct addrinfo *srt_addrs;
   int ret = getaddrinfo(host, port, &hints, &srt_addrs);
   if (ret != 0) {
-    spdlog::error("Failed to resolve the address: {}:{}", host, port);
-    return -1;
+      spdlog::error("Failed to resolve the address: {}:{}: {}", host, port, gai_strerror(ret));
+      return -1;
   }
 
   int tmp_sock = socket(AF_INET, SOCK_DGRAM, 0);
