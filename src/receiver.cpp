@@ -768,10 +768,9 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  // Set receive buffer size to 32MB
-  int rcv_buf = 32 * 1024 * 1024;
-  ret =
-      setsockopt(srtla_sock, SOL_SOCKET, SO_RCVBUF, &rcv_buf, sizeof(rcv_buf));
+  // Set receive buffer size to 100MB
+  int rcv_buf = 100 * 1024 * 1024;
+  ret = setsockopt(srtla_sock, SOL_SOCKET, SO_RCVBUF, &rcv_buf, sizeof(rcv_buf));
   if (ret < 0) {
     spdlog::critical("Failed to set SRTLA socket receive buffer size");
     exit(EXIT_FAILURE);
