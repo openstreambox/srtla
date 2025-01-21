@@ -707,10 +707,6 @@ inline std::vector<char> get_random_bytes(size_t size) {
   return ret;
 }
 
-#define ARG_SRTLA_HOST (argv[2])
-#define ARG_SRTLA_PORT (argv[3])
-#define ARG_IPS_FILE (argv[4])
-
 int main(int argc, char **argv) {
   argparse::ArgumentParser args("srtla_send", VERSION);
   // SRT_LISTEN_PORT SRTLA_HOST SRTLA_PORT BIND_IPS_FILE
