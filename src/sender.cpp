@@ -756,11 +756,8 @@ int main(int argc, char **argv) {
   int port = args.get<uint16_t>("listen_port");
 
   // Read a random connection group id for this session
-  FILE *fd = fopen("/dev/urandom", "rb");
-  assert(fd != NULL);
-  assert(fread(srtla_id, 1, SRTLA_ID_LEN, fd) == SRTLA_ID_LEN);
-  fclose(fd);
-
+  auto srtla_id = get_random_bytes(SRTLA_ID_LEN / 2);
+  
   FD_ZERO(&active_fds);
 
   listen_addr.sin_family = AF_INET;
