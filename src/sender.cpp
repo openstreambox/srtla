@@ -17,22 +17,21 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <arpa/inet.h>
-#include <assert.h>
-#include <fstream>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <signal.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <time.h>
+#include <assert.h>
 #include <unistd.h>
+#include <time.h>
+#include <signal.h>
+#include <netdb.h>
+#include <fstream>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <argparse/argparse.hpp>
-
 #include "sender.h"
 
 #define PKT_LOG_SZ 256
