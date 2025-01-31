@@ -442,7 +442,7 @@ void handle_srtla_data(time_t ts) {
   int n =
       recvfrom(srtla_sock, &buf, MTU, 0, (struct sockaddr *)&srtla_addr, &len);
   if (n < 0) {
-    spdlog::error("Failed to read an srtla packet");
+    spdlog::error("Failed to read an srtla packet {}", strerror(errno));
     return;
   }
 
@@ -753,7 +753,7 @@ int main(int argc, char **argv) {
   }
 
   // Set up the listener socket for incoming SRT connections
-  int srtla_sock = socket(AF_INET6, SOCK_DGRAM, 0);
+  srtla_sock = socket(AF_INET6, SOCK_DGRAM, 0);
   if (srtla_sock < 0) {
     spdlog::critical("SRTLA socket creation failed");
     exit(EXIT_FAILURE);
